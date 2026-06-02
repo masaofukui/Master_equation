@@ -25,6 +25,7 @@ using Printf
 using Random
 using Plots
 using QuantEcon: rouwenhorst
+using BenchmarkTools
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -270,18 +271,24 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
     g      = ss.g
     T      = ss.T
 
-    # --- policy sensitivity to the CURRENT price, continuation fixed: ψ = ∂a'/∂q
+    # --- policy sensitivity to the CURRENT price, continuation fixed: dap_dq = ∂a'/∂q
     EWa_ss = continuation_EWa(ss.c, ss.Π, p_local)
     dq = 1e-5
     _, ap_p = egm_policy(EWa_ss, q + dq, p_local, agrid)
     _, ap_m = egm_policy(EWa_ss, q - dq, p_local, agrid)
-    dap_dq = vec((ap_p .- ap_m) ./ (2dq))                 # ψ_i < 0 (demand slopes down)
+    dap_dq = vec((ap_p .- ap_m) ./ (2dq))                 # dap_dq_i < 0 (demand slopes down)
 
     # constrained households: policy pinned at the borrowing limit
     constrained = vec(ss.ap) .<= (agrid[1] + 1e-8)
     dap_dq[constrained] .= 0.0
 
-    # curvature denominator  denom_i = -(u'(c)-q u''(c)a') / ψ_i  (>0, unconstrained)
+    # Curvature denominator.  With the FOC residual R(a';q) = q u'(c) - EW_a(a')
+    # (c = a + y - q a'), denom_i is the second-order curvature of the saving
+    # problem, i.e. minus the derivative of the residual in a':
+    #     denom_i ≡ ∂R/∂a' = -(q² u''(c_i) + EW_aa,i)  > 0  (unconstrained).
+    # We avoid forming EW_aa by using the implicit function theorem on R = 0,
+    # dap_dq_i = ∂a'/∂q = -(∂R/∂q)/(∂R/∂a') with ∂R/∂q = u'(c) - q u''(c) a', hence
+    #     denom_i = -(u'(c_i) - q u''(c_i) a'_i) / dap_dq_i.
     uc  = cflat .^ (-γ)
     ucc = -γ .* cflat .^ (-γ - 1)
     num = uc .- q .* ucc .* apflat                   # = u'(c) - q u''(c) a'
@@ -297,7 +304,7 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
     g_dap_dq = dot(g, dap_dq)                                   # aggregate demand slope (<0)
 
     v   = zeros(n, n)
-    DΦ  = Matrix(T')
+    G  = zeros(n, n)
     Qp  = -(apflat) ./ g_dap_dq                           # initial price impact (B_future=0)
 
     local err
@@ -305,7 +312,7 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
         va = dv_da(v, p_local, agrid)
 
         # response of policy to the distribution through FUTURE prices, q fixed
-        Bfut = β .* (T * va * DΦ)
+        Bfut = β .* (T * va * (Matrix(T') + G))
         @inbounds for i in 1:n
             if isfinite(denom[i])
                 @views Bfut[i, :] ./= denom[i]
@@ -320,11 +327,10 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
         # total policy response to the impulse and the GE kernel
         dadg = dap_dq * Qp' .+ Bfut                       # da'_i/dg_j  (n×n)
         G    = M * dadg
-        DΦ   = Matrix(T') .+ G
 
         # direct price impact (rank one) and the FAME update
         Dtil = bD * Qp'                              # Dtilde[i,j] = -u'(c_i)a'_i Q'_j
-        vnew = Dtil .+ β .* (T * v * DΦ)
+        vnew = Dtil .+ β .* (T * v * (Matrix(T') + G))
 
         err = maximum(abs.(vnew .- v))
         v = vnew
@@ -333,7 +339,7 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
         end
         err < tol && break
     end
-    return (; v, DΦ, Qp, dap_dq, G = DΦ .- Matrix(T'))
+    return (; v, Qp, dap_dq, G)
 end
 
 # global handle so helper closures can see the parameters/grids
@@ -504,12 +510,12 @@ function main(p::Huggett = Huggett(); run_mit = true)
     return ss, fame
 end
 
-main()
+# Run the demo only when this file is executed directly (`julia huggett_fame.jl`),
+# not when it is `include`d from another script (e.g. huggett_ssj.jl).
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
 
-
-p = Huggett()
-
-ss = solve_steady(p)
-
-using BenchmarkTools
-@time fame = solve_fame(ss)
+    p = Huggett()
+    ss = solve_steady(p)
+    @time fame = solve_fame(ss)
+end
