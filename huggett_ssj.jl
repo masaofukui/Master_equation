@@ -34,9 +34,11 @@
 #
 #  This is exactly the linear equilibrium the FAME solves, so the two IRFs agree
 #  up to truncation (horizon T) and numerical-differentiation error.
+#
+#  FUNCTIONS ONLY: relies on the model/steady-state/EGM routines defined in
+#  huggett_fame.jl (PARAMS, egm_policy, continuation_EWa, make_T, make_M, idx).
+#  The toplevel driver run_huggett.jl loads both files.
 # =============================================================================
-
-include("huggett_fame.jl")   # steady state, EGM, make_T, make_M, solve_fame, ...
 
 # -----------------------------------------------------------------------------
 # Step 1.  Fake-news primitives via one backward iteration.
@@ -126,64 +128,10 @@ function ssj_irf(ss, h0; T::Int = 300, dq::Float64 = 1e-4)
 end
 
 # -----------------------------------------------------------------------------
-# Driver: solve the SSJ IRF, the FAME IRF, and compare them on the same shock.
+# Convenience: SSJ interest-rate impulse response (bps, annual) to a one-time
+# distributional shock h0, for t = 0,...,Tshow-1.
 # -----------------------------------------------------------------------------
-function main_ssj(p::Huggett = Huggett(); T::Int = 300, Tshow::Int = 40)
-    PARAMS[] = p
-    println("="^70)
-    println(" Huggett via the Sequence-Space Jacobian (fake-news algorithm)")
-    println("="^70)
-    ss = solve_steady(p)
-    n  = p.na * p.ny
-    @printf("  steady state: q* = %.6f   r* = %.6f\n", ss.q, ss.r)
-
-    # same wealth-redistribution impulse as in huggett_fame.jl's main()
-    agrid = ss.agrid
-    iy0   = 1
-    i_lo  = idx(searchsortedfirst(agrid, 0.0), iy0, p)
-    i_hi  = idx(searchsortedfirst(agrid, 5.0), iy0, p)
-    ε     = 1e-3
-    h0    = zeros(n); h0[i_hi] += ε; h0[i_lo] -= ε
-
-    # ---- SSJ ----
-    dq_ssj, J, F, E = ssj_irf(ss, h0; T = T)
-    dr_ssj = -dq_ssj ./ ss.q^2
-
-    # ---- FAME (master equation), same impulse ----
-    fame = solve_fame(ss; verbose = false)
-    dq_fame = zeros(T); h = copy(h0)
-    for t in 1:T
-        dq_fame[t] = dot(fame.Qp, h)
-        h = fame.DΦ * h
-    end
-    dr_fame = -dq_fame ./ ss.q^2
-
-    println("\n  Interest-rate IRF (bps, annual):  SSJ vs. master equation (FAME)")
-    @printf("    t        dr SSJ (bps)      dr FAME (bps)        diff (bps)\n")
-    for t in 1:8
-        @printf("   %2d        %+11.4f       %+11.4f       %+.2e\n",
-                t-1, 1e4*dr_ssj[t], 1e4*dr_fame[t], 1e4*(dr_ssj[t]-dr_fame[t]))
-    end
-    maxdiff = maximum(abs.(dr_ssj[1:Tshow] .- dr_fame[1:Tshow]))
-    @printf("    max|SSJ-FAME| over t<%d = %.3e bps\n", Tshow, 1e4*maxdiff)
-
-    # ---- plot both IRFs (propagation tail) ----
-    tg = 1:(Tshow-1)
-    plt = plot(tg, 1e4 .* dr_ssj[2:Tshow];
-               label = "SSJ", lw = 2, marker = :circle, ms = 3,
-               xlabel = "period t", ylabel = "Δr_t (bps, annual)",
-               title = "Huggett interest-rate IRF: SSJ vs master equation",
-               legend = :topright, framestyle = :box)
-    plot!(plt, tg, 1e4 .* dr_fame[2:Tshow];
-          label = "FAME", lw = 2, ls = :dash, marker = :diamond, ms = 3)
-    hline!(plt, [0.0]; label = "", lc = :black, lw = 0.5, alpha = 0.5)
-    out = joinpath(@__DIR__, "huggett_ssj_vs_fame.png")
-    savefig(plt, out)
-    @printf("\n  saved comparison plot to %s\n", out)
-
-    return (; ss, dq_ssj, dq_fame, J, F, E)
-end
-
-if abspath(PROGRAM_FILE) == @__FILE__
-    main_ssj()
+function ssj_irf_bps(ss, h0; Tshow::Int = 40, T::Int = 300, dq::Float64 = 1e-4)
+    dqpath, = ssj_irf(ss, h0; T = T, dq = dq)
+    return -1e4 .* dqpath[1:Tshow] ./ ss.q^2
 end

@@ -1,15 +1,14 @@
 # =============================================================================
 #  Nonlinear perfect-foresight (MIT-shock) transition for the Huggett economy.
 #
-#  Companion to huggett_fame.jl: this file is `include`d from there and shares
-#  its module scope, so it relies on the following definitions made in the main
-#  file:
+#  FUNCTIONS ONLY.  Shares module scope with huggett_fame.jl (loaded together by
+#  the toplevel driver run_huggett.jl), so it relies on:
 #     - the `Huggett` parameter struct and the global `PARAMS::Ref{Huggett}`,
 #     - the steady-state object `ss` (fields q, c, g, ap, agrid, Π),
 #     - the household routines `egm_policy`, `continuation_EWa`, `make_T`.
 #
-#  It is kept separate purely for organization; it is only used to VALIDATE the
-#  linear FAME solved in huggett_fame.jl and is not needed to solve the FAME.
+#  It provides the fully nonlinear transition used to VALIDATE the linear FAME
+#  and SSJ solutions; it is not needed to solve either of them.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -58,4 +57,13 @@ function mit_transition(ss, h0; Tmax = 120, damp = 0.5, maxit = 400)
         err < 1e-11 && break
     end
     return q[1:Tmax] .- qss          # dq_t for t = 0, 1, ..., Tmax-1
+end
+
+# -----------------------------------------------------------------------------
+# Convenience: nonlinear MIT interest-rate impulse response (bps, annual) to a
+# one-time distributional shock h0, for t = 0,...,Tshow-1.
+# -----------------------------------------------------------------------------
+function mit_irf_bps(ss, h0; Tshow::Int = 40, Tmax::Int = 120)
+    dq = mit_transition(ss, h0; Tmax = max(Tmax, Tshow))
+    return -1e4 .* dq[1:Tshow] ./ ss.q^2
 end

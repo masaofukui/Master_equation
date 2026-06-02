@@ -1,9 +1,11 @@
 # =============================================================================
-#  FAME for the discrete-time Huggett economy
+#  Model + FAME library for the discrete-time Huggett economy
 #
 #  Companion code to KrusellSmith_DiscreteTime.tex (Section "The Huggett variant").
+#  This file defines FUNCTIONS ONLY (no top-level execution); the toplevel driver
+#  run_huggett.jl loads it together with huggett_mit.jl and huggett_ssj.jl.
 #
-#  Solves
+#  Provides
 #    (1) the steady state of a discrete-time Huggett model (EGM + bond-market
 #        clearing on the bond price q, with 1/q = 1 + r), and
 #    (2) the First-order Approximation to the Master Equation (FAME): the
@@ -16,7 +18,7 @@
 #        through the single implicit bond price q = Q(g), so both Dtilde and G
 #        depend on V (the price impact is part of the fixed point).
 #
-#  Only the Julia standard library is used (LinearAlgebra, Printf).
+#  Dependencies: LinearAlgebra, Printf, Random, Plots, QuantEcon.
 #  Tested on Julia 1.12.
 # =============================================================================
 
@@ -25,7 +27,6 @@ using Printf
 using Random
 using Plots
 using QuantEcon: rouwenhorst
-using BenchmarkTools
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -345,11 +346,6 @@ end
 # global handle so helper closures can see the parameters/grids
 const PARAMS = Ref{Huggett}()
 
-# Nonlinear perfect-foresight (MIT-shock) transition `mit_transition`, used only
-# to validate the FAME.  Kept in a separate file; it shares this module scope
-# and relies on PARAMS, egm_policy, continuation_EWa, make_T defined above.
-include("huggett_mit.jl")
-
 # -----------------------------------------------------------------------------
 # Validation of the contemporaneous price impact.
 # Temporary equilibrium with the continuation FIXED at steady state: solve for
@@ -393,129 +389,43 @@ function validate_priceimpact(ss, fame)
 end
 
 # -----------------------------------------------------------------------------
-# Driver
+# A natural wealth redistribution: compress the asset distribution slightly
+# toward its cross-sectional mean ā.  Each household's assets are nudged a
+# fraction κ of the way to the mean,  a ↦ a + κ(ā − a)  (savers give to
+# borrowers), and the resulting mass is spread back onto the grid with the same
+# lottery used by the model's transition.  This perturbs the WHOLE distribution
+# smoothly (no spikes) and, because the lottery preserves the placed value,
+# conserves population and aggregate assets exactly:
+#     Σ_i h0_i = 0    and    Σ_i a_i h0_i = 0.
+# κ > 0 compresses inequality; κ < 0 spreads it.
 # -----------------------------------------------------------------------------
-function main(p::Huggett = Huggett(); run_mit = true)
-    PARAMS[] = p
-    println("="^70)
-    println(" Discrete-time Huggett: steady state")
-    println("="^70)
-    ss = solve_steady(p)
-    n = p.na * p.ny
-    frac_constr = sum(ss.g[i] for i in 1:n if vec(ss.ap)[i] <= ss.agrid[1] + 1e-8)
-    @printf("  bond price   q* = %.6f\n", ss.q)
-    @printf("  interest     r* = %.6f   (annual)\n", ss.r)
-    @printf("  aggregate bonds A = %.3e   (target B = %.3f)\n",
-            aggregate_assets(ss.g, p, ss.agrid), p.B)
-    @printf("  fraction at borrowing limit = %.3f\n", frac_constr)
-
-    println("\n", "="^70)
-    println(" FAME: solving for the Impulse Value v(x,ξ) = ∂V/∂g")
-    println("="^70)
-    fame = solve_fame(ss)
-
-    # Stability: (T'+G) always has a trivial unit eigenvalue (mass conservation,
-    # left-eigenvector = ones).  Mass-preserving deviations (Σh=0) are governed by
-    # the remaining spectrum, so the relevant object is the 2nd-largest modulus.
-    λ = sort(abs.(eigvals(fame.DΦ)); rev = true)
-    @printf("\n  largest eigenvalue of (T'+G)      = %.6f  (mass conservation)\n", λ[1])
-    @printf("  2nd-largest |eigenvalue|          = %.6f  %s\n", λ[2],
-            λ[2] < 1 ? "(stable; sets the decay rate)" : "(UNSTABLE)")
-
-    # ----- Validation: price impact Q' against a direct finite difference -----
-    # Hold the continuation at steady state and recompute the market-clearing
-    # bond price for g = g^ss + ε h.  d q/dε should equal Q'_simple · h, where
-    # Q'_simple = -a'/(g·dap_dq) is Q' without the future-feedback term.
-    validate_priceimpact(ss, fame)
-
-    # --- Impulse response to a distributional shock --------------------------
-    # h0: move a small mass ε from a low-asset state to a high-asset state
-    # (mass-preserving:  Σ h0 = 0).
-    agrid = ss.agrid
-    iy0 = 1
-    i_lo = idx(searchsortedfirst(agrid, 0.0),            iy0, p)
-    i_hi = idx(searchsortedfirst(agrid, 5.0),            iy0, p)
-    ε = 1e-3
-    h0 = zeros(n); h0[i_hi] += ε; h0[i_lo] -= ε
-
-    Tmax = 40
-    dq = zeros(Tmax); dr = zeros(Tmax)
-    h = copy(h0)
-    for t in 1:Tmax
-        dq[t] = dot(fame.Qp, h)            # bond-price deviation (FAME, linear)
-        dr[t] = -dq[t] / ss.q^2            # since r = 1/q - 1,  dr = -dq/q²
-        h = fame.DΦ * h
+function redistribution_shock(ss, p::Huggett; κ = 1e-2)
+    agrid = ss.agrid; g = ss.g
+    abar  = aggregate_assets(g, p, agrid)        # cross-sectional mean assets (= B)
+    g̃ = zeros(p.na * p.ny)
+    for iy in 1:p.ny, ia in 1:p.na
+        i = idx(ia, iy, p)
+        atgt   = agrid[ia] + κ * (abar - agrid[ia])
+        atgt   = clamp(atgt, agrid[1], agrid[end])
+        k, w   = bracket(agrid, atgt); w = clamp(w, 0.0, 1.0)
+        g̃[idx(k,   iy, p)] += g[i] * (1 - w)     # lottery keeps the marginal over y fixed
+        g̃[idx(k+1, iy, p)] += g[i] * w
     end
-
-    println("\n  Impulse response to a one-time wealth-redistribution shock")
-    println("  (mass ε from a≈0 to a≈5 among low-income households):")
-    println("    t=0 is the contemporaneous impact; t≥1 is propagation via (T'+G).")
-    dr_mit = Float64[]
-    if run_mit
-        # Nonlinear MIT-shock transition for the SAME impulse (validation)
-        dq_nl = mit_transition(ss, h0; Tmax = 120)
-        dr_mit = -1e4 .* dq_nl[1:Tmax] ./ ss.q^2     # MIT interest response (bps)
-        println("    FAME = linear Impulse-Value prediction; MIT = nonlinear transition.")
-        @printf("    t      d r_t  FAME (bps)     d r_t  MIT (bps)\n")
-        for t in 1:8
-            @printf("   %2d        %+9.4f          %+9.4f\n",
-                    t-1, 1e4 * dr[t], -1e4 * dq_nl[t] / ss.q^2)
-        end
-        @printf("    max|FAME-MIT| over t≤40 = %.3e bps\n",
-                1e4 * maximum(abs.(dr .+ dq_nl[1:Tmax] ./ ss.q^2)))
-    else
-        @printf("    t      d r_t  FAME (bps)\n")
-        for t in 1:8
-            @printf("   %2d        %+9.4f\n", t-1, 1e4 * dr[t])
-        end
-    end
-
-    # --- Plot the interest-rate impulse response (FAME vs MIT) ---------------
-    # Two panels: the full response (dominated by the t=0 impact) and a zoom on
-    # the propagation tail (t>=1), where the FAME-vs-MIT comparison is sharpest.
-    tgrid = 0:(Tmax - 1)
-    p1 = plot(tgrid, 1e4 .* dr;
-              label = "FAME (linear)", lw = 2, marker = :circle, ms = 3,
-              xlabel = "period t", ylabel = "Δr_t  (bps, annual)",
-              title = "Full response (incl. t=0 impact)",
-              legend = :bottomright, framestyle = :box)
-    p2 = plot(tgrid[2:end], 1e4 .* dr[2:end];
-              label = "FAME (linear)", lw = 2, marker = :circle, ms = 3,
-              xlabel = "period t", ylabel = "Δr_t  (bps, annual)",
-              title = "Propagation tail (t ≥ 1)",
-              legend = :topright, framestyle = :box)
-    if run_mit
-        plot!(p1, tgrid, dr_mit;
-              label = "MIT (nonlinear)", lw = 2, ls = :dash, marker = :diamond, ms = 3)
-        plot!(p2, tgrid[2:end], dr_mit[2:end];
-              label = "MIT (nonlinear)", lw = 2, ls = :dash, marker = :diamond, ms = 3)
-    end
-    hline!(p1, [0.0]; label = "", lc = :black, lw = 0.5, alpha = 0.5)
-    hline!(p2, [0.0]; label = "", lc = :black, lw = 0.5, alpha = 0.5)
-    plt = plot(p1, p2; layout = (1, 2), size = (1000, 420),
-               plot_title = "Interest-rate response to a wealth-redistribution shock")
-    outpng = joinpath(@__DIR__, "huggett_r_response.png")
-    savefig(plt, outpng)
-    @printf("\n  saved interest-rate impulse-response plot to %s\n", outpng)
-    # persistence is governed by the 2nd-largest eigenvalue modulus of (T'+G)
-    λ2 = sort(abs.(eigvals(fame.DΦ)); rev = true)[2]
-    @printf("    propagation decay rate (per period) ≈ %.4f  (half-life ≈ %.1f periods)\n",
-            λ2, log(0.5) / log(λ2))
-
-    # --- Welfare value of the impulse:  ΔV(x) = (v h0)(x) --------------------
-    ΔV = fame.v * h0
-    @printf("\n  Welfare effect ΔV = v·h0:  min %.3e   max %.3e\n",
-            minimum(ΔV), maximum(ΔV))
-
-    return ss, fame
+    return g̃ .- g
 end
 
-# Run the demo only when this file is executed directly (`julia huggett_fame.jl`),
-# not when it is `include`d from another script (e.g. huggett_ssj.jl).
-if abspath(PROGRAM_FILE) == @__FILE__
-    main()
-
-    p = Huggett()
-    ss = solve_steady(p)
-    @time fame = solve_fame(ss)
+# -----------------------------------------------------------------------------
+# Convenience: FAME interest-rate impulse response (bps, annual) to a one-time
+# distributional shock h0, traced for t = 0,...,Tshow-1 via h_{t+1} = (T'+G) h_t.
+# -----------------------------------------------------------------------------
+function fame_irf(ss, fame, h0; Tshow::Int = 40)
+    DΦ = Matrix(ss.T') .+ fame.G    # linearized law of motion of the distribution
+    dr = zeros(Tshow)
+    h  = copy(h0)
+    for t in 1:Tshow
+        dq    = dot(fame.Qp, h)        # bond-price deviation (FAME, linear)
+        dr[t] = -1e4 * dq / ss.q^2     # r = 1/q - 1  =>  dr = -dq/q², in bps
+        h     = DΦ * h
+    end
+    return dr
 end
