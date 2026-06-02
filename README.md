@@ -32,7 +32,7 @@ PDF) and `literature/` (reference papers) are kept locally but are **git-ignored
 ## Running
 
 ```bash
-julia toplevel_huggett.jl     # solve + compare + save figure/huggett_r_response_*.pdf
+julia toplevel_huggett.jl     # solve + compare + save figure/huggett_r_response_kappa*.pdf
 julia bench_ssj_fame.jl       # performance table
 ```
 
