@@ -1,5 +1,7 @@
 # Master equation in discrete time — Huggett example
 
+[Lecture note link](https://masaofukui.github.io/741_Fukui_2025_topic10.pdf)
+
 Discrete-time companion to the continuous-time master-equation framework of
 Bilal, *Solving Heterogeneous Agent Models with the Master Equation*. The code
 solves the steady state of a discrete-time Huggett economy (idiosyncratic income,
@@ -63,3 +65,7 @@ toward its cross-sectional mean, `a ↦ a + κ(ā − a)` (savers → borrowers)
 spread back onto the grid with the model's lottery. It conserves both population
 and aggregate assets exactly (`Σ h₀ = 0`, `Σ aᵢ h₀ᵢ = 0`), so the bond market
 only re-prices a reshuffling of the fixed asset stock.
+
+
+## Notes
+Cursor Opus 4.8 was used in designing and implementing the code.

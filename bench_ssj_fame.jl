@@ -57,3 +57,45 @@ end
 println("-"^78)
 println(" speedup = (slowest median) / (method median);  larger is faster")
 println("="^78)
+
+# ---- render the same table to a PDF (Computer Modern, like the other figures) ----
+commas(x) = replace(string(round(Int, x)), r"(?<=\d)(?=(\d{3})+$)" => ",")
+
+function save_perf_table_pdf(methods, slowest; path,
+        title = "Huggett interest-rate IRF: solver performance")
+    headers = ["method", "min (ms)", "median (ms)", "memory (MiB)", "allocs", "speedup"]
+    xcol    = [0.02, 0.40, 0.56, 0.74, 0.89, 0.99]
+    halign  = [:left, :right, :right, :right, :right, :right]
+    nrow    = length(methods)
+    plt = plot(; xlim = (0, 1), ylim = (0, 1), framestyle = :none, legend = false,
+               grid = false, ticks = nothing,
+               size = (980, 110 + 40 * (nrow + 1)), fontfamily = "Computer Modern",
+               title = title, titlefontsize = 16,
+               left_margin = 4Plots.mm, right_margin = 4Plots.mm, top_margin = 3Plots.mm)
+    ytop = 0.86
+    dy   = 0.80 / (nrow + 1)
+    for (x, h, ha) in zip(xcol, headers, halign)
+        annotate!(plt, x, ytop, text(h, 14, ha, "Computer Modern"))
+    end
+    yline = ytop - 0.5dy
+    plot!(plt, [0.0, 1.0], [yline, yline]; lc = :black, lw = 1.2)
+    for (r, (name, m)) in enumerate(methods)
+        y = ytop - r * dy
+        vals = [name,
+                @sprintf("%.1f", m.min),
+                @sprintf("%.1f", m.med),
+                @sprintf("%.0f", m.mem),
+                commas(m.alloc),
+                @sprintf("%.0f×", slowest / m.med)]
+        for (x, v, ha) in zip(xcol, vals, halign)
+            annotate!(plt, x, y, text(v, 13, ha, "Computer Modern"))
+        end
+    end
+    savefig(plt, path)
+    return path
+end
+
+tbl_pdf = joinpath(@__DIR__, "figure", "performance_table.pdf")
+mkpath(dirname(tbl_pdf))
+save_perf_table_pdf(methods, slowest; path = tbl_pdf)
+@printf(" saved performance table to %s\n", tbl_pdf)

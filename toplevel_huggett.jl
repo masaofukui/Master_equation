@@ -44,7 +44,7 @@ function run_huggett(p::Huggett = Huggett(); Tshow::Int = 25, Tssj::Int = 300)
             λ[1], λ[2], λ[2] < 1 ? "(stable)" : "(UNSTABLE)")
 
     # ---- Same impulse for all three methods ----
-    κshock = 0.01                                 # compress assets 1% toward the mean
+    κshock = 0.5                                # compress assets 1% toward the mean
     h0 = redistribution_shock(ss, p; κ = κshock)
 
     dr_fame = fame_irf(ss, fame, h0; Tshow = Tshow)            # master equation
@@ -68,7 +68,7 @@ function run_huggett(p::Huggett = Huggett(); Tshow::Int = 25, Tssj::Int = 300)
     plt = plot(tg, dr_fame .* pp;
                label = "FAME (master equation)", lw = 4, marker = :circle, ms = 6,
                xlabel = "period \$t\$", ylabel = "\$ \\Delta r_t \$  (pp, annual)",
-               title = "Interest-rate response to a wealth redistribution (κ = $(κshock))",
+               title = "Interest-rate response to a wealth redistribution (\$\\kappa\$ = $(κshock))",
                legend = :topright, framestyle = :box, size = (900, 520),
                fontfamily = "Computer Modern",
                guidefontsize = 15, tickfontsize = 13, legendfontsize = 13, titlefontsize = 13,
