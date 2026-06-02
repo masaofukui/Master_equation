@@ -1,0 +1,541 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{empheq}
+\usepackage{bm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\X}{\mathcal{X}}
+\newcommand{\Tr}{\mathcal{T}}
+\newcommand{\Tstar}{\mathcal{T}^{*}}
+\newcommand{\Gop}{\mathcal{G}}
+\newcommand{\Aop}{\mathcal{A}}
+\newcommand{\Sop}{\mathcal{S}}
+\newcommand{\gss}{g^{\mathrm{ss}}}
+\newcommand{\Vss}{V^{\mathrm{ss}}}
+\newcommand{\css}{c^{\mathrm{ss}}}
+\newcommand{\sss}{s^{\mathrm{ss}}}
+\newcommand{\dd}{\,\mathrm{d}}
+
+\title{The Krusell--Smith Economy in Discrete Time:\\ A Master Equation Formulation}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Bilal (2023, ``Solving Heterogeneous Agent Models with the Master Equation'')
+develops the Master Equation representation of heterogeneous-agent economies and
+its first-order approximation (the FAME) in \emph{continuous} time, using the
+Krusell and Smith (1998) economy as the leading example. This note writes down
+the \emph{discrete-time} analogue. The logic is unchanged: the value function is
+defined on the space of distributions and a single Bellman equation summarizes
+the equilibrium. The only structural differences are mechanical translations of
+the continuous-time objects: the infinitesimal generator $L$ becomes a one-period
+transition (Markov) operator $\Tr$, the discount \emph{rate} $\rho$ becomes a
+discount \emph{factor} $\beta$, the Kolmogorov forward equation
+$\partial_t g = L^{*}[g]$ becomes the one-step push-forward $g_{t+1}=\Tstar[g_t]$,
+and ``sums of generators'' ($L_1+L_2$) become ``products of transition operators''
+($\Tr_1\Tr_2$). We verify that the discrete-time Master Equation collapses to
+Bilal's continuous-time Master Equation as the period length $\Delta t\to 0$, and
+we derive the discrete-time FAME, including aggregate shocks.
+\end{abstract}
+
+\tableofcontents
+
+\section{Setup}
+
+Time is discrete, $t=0,1,2,\dots$. There is a unit mass of households. A household
+is described by the idiosyncratic state $x=(a,y)$, where $a\ge 0$ are asset holdings
+(subject to a borrowing limit $a\ge\underline a$, normalized to $\underline a=0$)
+and $y$ is idiosyncratic labor productivity. Let $\X=[\,0,\infty)\times Y$ denote
+the idiosyncratic state space.
+
+\paragraph{Idiosyncratic productivity.}
+Productivity $y_t$ is an exogenous, stationary Markov process, independent across
+households, with transition kernel $P(y,\dd y')=\Pr(y_{t+1}\in\dd y'\mid y_t=y)$.
+Define the associated \emph{income transition operator} (a Markov, i.e.\ expectation,
+operator)
+\[
+  (P\varphi)(y)\;\equiv\;\E\!\left[\varphi(y_{t+1})\mid y_t=y\right]
+  \;=\;\int \varphi(y')\,P(y,\dd y').
+\]
+In continuous time Bilal uses the \emph{generator} $M(y)$ of the productivity
+process (e.g.\ $M(y)[V]=\mu(y)V'(y)+\tfrac{\sigma(y)^2}{2}V''(y)$ for a diffusion).
+Its discrete-time counterpart is the one-period operator $P$, related to a generator
+by $P=\mathrm{Id}+\Delta t\,M+o(\Delta t)$.
+
+\paragraph{Preferences and budget.}
+Households have time-separable preferences with period utility $u$ (e.g.\ CRRA,
+$u(c)=\tfrac{c^{1-\gamma}-1}{1-\gamma}$) and discount factor $\beta\in(0,1)$. They
+save in a single risk-free asset and face the flow budget constraint
+\begin{equation}\label{eq:budget}
+  c_t + a_{t+1} \;=\; (1+r_t)\,a_t + w_t\,y_t,
+  \qquad a_{t+1}\ge 0,
+\end{equation}
+where $r_t$ is the net interest rate and $w_t$ the wage. (The discount factor maps
+to the continuous-time rate by $\beta=e^{-\rho\Delta t}$; the gross return
+$1+r_t$ maps to $1+r_t\Delta t$.)
+
+\paragraph{Technology and prices.}
+A representative firm operates $Y_t=Z\,K_t^{\alpha}N_t^{1-\alpha}$, renting capital
+$K_t$ (equal to aggregate assets) and hiring labor $N_t$ (equal to aggregate
+efficiency units). With no depreciation, profit maximization and market clearing
+pin prices to the current distribution $g_t$ of $x=(a,y)$:
+\begin{equation}\label{eq:prices}
+  r_t = R(g_t)\equiv \alpha Z\!\left(\frac{K(g_t)}{N(g_t)}\right)^{\alpha-1},
+  \qquad
+  w_t = W(g_t)\equiv (1-\alpha)Z\!\left(\frac{K(g_t)}{N(g_t)}\right)^{\alpha},
+\end{equation}
+where $K(g)=\int a\,g(x)\dd x$ and $N(g)=\int y\,g(x)\dd x$. As in Bilal's
+equation~(2), $R$ and $W$ are functionals of the distribution.
+
+\section{Sequential equilibrium}
+
+\paragraph{Household problem.}
+Taking the price sequences $\{r_t,w_t\}$ as given, the household solves
+\begin{equation}\label{eq:seq-bellman}
+  V_t(a,y) \;=\; \max_{a'\ge 0}\;
+  u\!\big((1+r_t)a + w_t y - a'\big)
+  \;+\; \beta\,\E\!\left[V_{t+1}(a',y')\,\middle|\,y\right].
+\end{equation}
+Let $\hat a_{t}(x)\equiv \hat s_t(x)$ denote the optimal saving policy and
+$\hat c_t(x)=(1+r_t)a+w_ty-\hat s_t(x)$ optimal consumption. The interior
+optimality (Euler) condition is
+\begin{equation}\label{eq:euler}
+  u'(\hat c_t(x))\;=\;\beta\,(1+r_{t+1})\,\E\!\left[u'(\hat c_{t+1}(a',y'))\mid y\right],
+\end{equation}
+with complementary slackness at the borrowing constraint $a'=0$.
+
+\paragraph{Controlled transition operator.}
+Bundle the deterministic asset transition $a'=\hat s_t(x)$ with the stochastic
+income transition $P$ into the one-period \emph{controlled transition operator}
+$\Tr_t$ acting on functions of $x$,
+\begin{equation}\label{eq:Top}
+  (\Tr_t\varphi)(x)\;\equiv\;\E\!\left[\varphi(x_{t+1})\mid x_t=x\right]
+  \;=\;\int \varphi\big(\hat s_t(x),\,y'\big)\,P(y,\dd y'),
+\end{equation}
+the discrete-time analogue of the generator $L_t(x,c)$ in Bilal's equation~(1).
+Its adjoint $\Tstar_t$ pushes a distribution one period forward.
+
+\paragraph{Law of motion of the distribution.}
+The continuous-time Kolmogorov forward equation
+$\partial_t g_t=L_t^{*}[g_t]$ (Bilal eq.~3) becomes, in discrete time, the
+one-step \emph{push-forward}
+\begin{equation}\label{eq:kfe}
+  g_{t+1}(x') \;=\; \big(\Tstar_t\,g_t\big)(x')
+  \;=\; \int \mathbf 1\{\hat s_t(a,y)=a'\}\,P(y,\dd y')\,g_t(a,y)\dd a .
+\end{equation}
+Equation~\eqref{eq:kfe} is the discrete-time Kolmogorov forward equation: it simply
+transports mass according to the saving policy and the income chain.
+
+\paragraph{Equilibrium.} Given $g_0$, a sequential equilibrium is a path
+$\{V_t,\hat s_t,r_t,w_t,g_t\}$ such that \eqref{eq:seq-bellman} holds with prices
+\eqref{eq:prices} and the distribution evolves by \eqref{eq:kfe}. As in continuous
+time, the difficulty is the forward--backward structure: \eqref{eq:seq-bellman} is
+solved backward, \eqref{eq:kfe} forward, and prices are the fixed point that clears
+markets each period.
+
+\section{The discrete-time Master Equation}
+
+Following Bilal, make the distribution an explicit state variable. Substitute prices
+$r_t=R(g_t)$, $w_t=W(g_t)$ into the Bellman equation and replace the time index by
+an explicit dependence on the distribution, $V_t(x)\equiv V(x,g_t)$. Knowing the law
+of motion \eqref{eq:kfe} means the household can forecast next period's distribution:
+write the one-step distribution map
+\begin{equation}\label{eq:Phi}
+  \Phi(g)\;\equiv\;\Tstar(\,\cdot\,,g)[\,g\,],
+\end{equation}
+i.e.\ $\Phi(g)$ is the distribution obtained by applying \eqref{eq:kfe} once, using
+the policy that is optimal given the current distribution $g$. Then the household
+problem becomes fully recursive:
+\begin{empheq}[box=\fbox]{equation}\label{eq:master}
+  V(x,g) \;=\; \max_{a'\ge 0}\;
+  u\!\big((1+R(g))a + W(g)y - a'\big)
+  \;+\; \beta\,\int V\!\big((a',y'),\,\Phi(g)\big)\,P(y,\dd y').
+\end{empheq}
+Equation~\eqref{eq:master} is the \textbf{discrete-time Master Equation}. It is the
+exact discrete-time counterpart of Bilal's continuous-time Master Equation
+\[
+  \rho V(x,g)=\max_{c} u(c) + L(x,c,g)[V]
+  + \int \frac{\partial V}{\partial g}(x,x',g)\,L^{*}(x',g)[g]\dd x'.
+  \tag{Bilal, eq.~7}
+\]
+The two continuation terms of the continuous-time equation---the partial-equilibrium
+generator $L[V]$ (evolution of \emph{own} state) and the term
+$\int \partial_g V\,L^{*}[g]$ (evolution of the \emph{distribution})---are jointly
+encoded in the single discrete-time continuation
+$\beta\!\int V((a',y'),\Phi(g))P(y,\dd y')$: the conditional expectation over
+$(a',y')$ captures the evolution of the household's own state, while the argument
+$\Phi(g)$ captures the evolution of the aggregate distribution. As in continuous
+time, \eqref{eq:master} is the \emph{only} equation that needs to be solved: the
+distributional fixed point has been absorbed into the value function, so the
+representation is block-recursive.
+
+\subsection{Continuous-time limit (consistency check)}
+
+Let the period length be $\Delta t$, set $\beta=e^{-\rho\Delta t}$, scale the budget
+as a flow $a_{t+\Delta t}=a_t+(r_ta_t+w_ty_t-c_t)\Delta t$, and expand the operators
+to first order in $\Delta t$:
+\[
+  \Tr = \mathrm{Id}+\Delta t\,L + o(\Delta t),
+  \qquad
+  \Phi(g)=g+\Delta t\,L^{*}(g)[g]+o(\Delta t).
+\]
+The Master Equation \eqref{eq:master} (with flow utility $u(c)\,\Delta t$) becomes
+\[
+  V(x,g)=\max_c u(c)\,\Delta t
+  + (1-\rho\Delta t)\,\big(\mathrm{Id}+\Delta t\,L_x\big)
+  \Big[\,V(x,g)+\Delta t\!\int \tfrac{\partial V}{\partial g}(x,\xi,g)\,L^{*}(\xi,g)[g]\dd\xi\Big].
+\]
+Cancelling $V(x,g)$, dividing by $\Delta t$ and letting $\Delta t\to 0$ recovers
+exactly Bilal's equation~(7). Thus the discrete-time formulation is consistent with,
+and reduces to, the continuous-time Master Equation---confirming that ``the same
+methodology naturally works in discrete time.''
+
+\section{The discrete-time FAME}
+
+We now perturb \eqref{eq:master} around a deterministic steady state, following
+Bilal's First-order Approximation to the Master Equation (FAME).
+
+\paragraph{Steady state.}
+A steady state is $(\Vss,\gss)$ with prices $r^{\mathrm{ss}}=R(\gss)$,
+$w^{\mathrm{ss}}=W(\gss)$, policy $\sss(x)$, consumption $\css(x)$, solving
+\[
+  \Vss(x)=\max_{a'\ge0} u\big((1+r^{\mathrm{ss}})a+w^{\mathrm{ss}}y-a'\big)+\beta\,(\Tr\,\Vss)(x),
+  \qquad \gss=\Tstar\gss,
+\]
+where $\Tr$, $\Tstar$ are the steady-state transition operator \eqref{eq:Top} and its
+adjoint, evaluated at $\sss$.
+
+\paragraph{Impulse Value ansatz.}
+Let $h\equiv g-\gss$ be a small distributional impulse. To first order the value
+function is linear in $h$:
+\begin{equation}\label{eq:ansatz}
+  V(x,\gss+h)\;=\;\Vss(x)\;+\;\int v(x,\xi)\,h(\xi)\dd\xi \;+\;o(\|h\|),
+\end{equation}
+where $v(x,\xi)=\dfrac{\partial V}{\partial g}(x,\xi,\gss)$ is the \emph{Impulse
+Value}: the general-equilibrium effect on the value of a household at $x=(a,y)$ of
+adding an infinitesimal mass of households at $\xi=(a_\xi,y_\xi)$. This is identical
+to the continuous-time object; only the equation it satisfies differs.
+
+\paragraph{Derivation.}
+Substitute \eqref{eq:ansatz} into \eqref{eq:master} and linearize in $h$, using the
+envelope theorem (the saving policy is held at its optimum, so its first-order
+variation drops out). Three first-order channels appear.
+
+\emph{(i) Direct price impact.} Adding mass at $\xi$ changes $K$ by $a_\xi$ and $N$ by
+$y_\xi$, hence moves prices by $\dd r=R_K a_\xi+R_N y_\xi$ and
+$\dd w=W_K a_\xi+W_N y_\xi$ (derivatives of \eqref{eq:prices} at $\gss$). The induced
+change in disposable income, valued at the steady-state marginal utility, is
+$u'(\css(x))\,D(x,\xi)$ with the \emph{price-impact function}
+\begin{equation}\label{eq:D}
+  D(x,\xi)\;=\;\big(R_K a+W_K y\big)\,a_\xi+\big(R_N a+W_N y\big)\,y_\xi,
+\end{equation}
+exactly Bilal's $D(x,x')=(R_0 a_\xi+R_1 y_\xi)a+(W_0 a_\xi+W_1 y_\xi)y$ with
+$R_0=R_K,\,R_1=R_N,\,W_0=W_K,\,W_1=W_N$.
+
+\emph{(ii) Continuation through transitions.} The continuation
+$\beta\int v(x^{+},\xi)\,\dd[\Phi]$ expands using $\Phi(\gss+h)=\gss+\Tstar h+\Gop h$,
+where $\Tstar h$ is the partial-equilibrium push-forward of the impulse (policies
+fixed) and $\Gop$ is the general-equilibrium response of the push-forward to
+policy changes (defined below). The push-forward part, after taking adjoints,
+transports the \emph{second} argument of $v$ one period forward; the expectation
+over the household's own next state transports the \emph{first} argument.
+
+\emph{(iii) General-equilibrium savings response.} The price change makes every
+household $\zeta$ revise its saving by $\delta s(\zeta,\xi)$, which reshapes next
+period's distribution through the kernel $G(\cdot,\xi)$ of $\Gop$.
+
+Collecting terms, the \textbf{discrete-time deterministic FAME} is
+\begin{empheq}[box=\fbox]{equation}\label{eq:fame}
+  v(x,\xi)\;=\;\underbrace{u'(\css(x))\,D(x,\xi)}_{\text{direct price impact}}
+  \;+\;\beta\,\underbrace{\big(\Tr_1\Tr_2\,v\big)(x,\xi)}_{\substack{\text{continuation:}\\ \text{own state }x\text{ and impulse }\xi}}
+  \;+\;\beta\,\underbrace{\Big(\Tr_1\!\big[v\star G\big]\Big)(x,\xi)}_{\substack{\text{GE: savings responses}\\ \text{of other households}}},
+\end{empheq}
+where $\Tr_1$ ($\Tr_2$) applies the transition operator \eqref{eq:Top} to the first
+(second) argument of $v$, and
+$(v\star G)(x,\xi)\equiv\int v(x,\zeta)\,G(\zeta,\xi)\dd\zeta$.
+
+\paragraph{Comparison with continuous time.}
+Bilal's continuous-time FAME (his eq.~9) reads
+\[
+  \rho v(x,x') = u'(\css(x))D(x,x')
+   + L(x)[v(\cdot,x')] + L(x')[v(x,\cdot)] + \!\int\! v(x,x'')G(x'',x',v)\dd x''.
+\]
+The dictionary is exact:
+\begin{itemize}[itemsep=2pt]
+\item the discount factor $\beta$ replaces $1/\rho$ (more precisely $1-\rho\,\Delta t$);
+\item the \emph{product} of transition operators $\Tr_1\Tr_2$ replaces the \emph{sum}
+of generators $L(x)+L(x')$ (because
+$\Tr_1\Tr_2=(\mathrm{Id}+\Delta t L_1)(\mathrm{Id}+\Delta t L_2)=\mathrm{Id}+\Delta t(L_1+L_2)+o(\Delta t)$);
+\item the GE kernel $G$ is the discrete-time analogue of $G(x'',x',v)$ and likewise
+depends on $v$ through the consumption (dMPC) response, so \eqref{eq:fame} is
+\emph{quadratic} in $v$, just like the continuous-time FAME.
+\end{itemize}
+
+\paragraph{The general-equilibrium kernel.}
+The per-period saving response of household $\zeta$ to a unit impulse at $\xi$ is the
+change in resources minus the consumption response,
+\[
+  \delta s(\zeta,\xi)\;=\;D(\zeta,\xi)\;-\;\delta c(\zeta,\xi),
+\]
+where $\delta c$ is obtained by linearizing the Euler equation \eqref{eq:euler}
+(a ``distributional MPC''). The kernel $G$ is then the linearized push-forward of the
+displaced mass: in continuous time
+$G(\zeta,\xi,v)=-\partial_{a_\zeta}\!\big[\gss(\zeta)\,\delta s(\zeta,\xi)\big]$ with
+$\delta c=\tfrac{1}{u''(\css)}\,\partial_a v$; in discrete time the divergence
+$-\partial_{a}(\cdot)$ is replaced by the linearization of the push-forward
+\eqref{eq:kfe} with respect to the saving policy,
+\[
+  \big(\Gop h\big)(x')\;=\;\frac{\partial}{\partial g}\Big[\Tstar(\cdot,g)[g]\Big]_{\gss}\!\!\cdot h,
+  \qquad
+  \big(\Gop h\big)(x')=\int G(x',\xi)\,h(\xi)\dd\xi .
+\]
+
+\subsection{Matrix (Sylvester) form}
+
+Discretize $x$ on a grid $\{x_i\}$, write $\mathbf V=[v(x_i,x_j)]$, let $T$ be the
+steady-state transition matrix (row-stochastic), $T^{\top}$ its transpose,
+$\widetilde D=[\,u'(\css_i)D(x_i,x_j)\,]$, and $G=G(\mathbf V)$ the discretized GE
+kernel. Because $\Tr_1$ left-multiplies, $\Tr_2$ right-multiplies by $T^{\top}$, and
+$v\star G$ is right-multiplication by $G$, the FAME \eqref{eq:fame} becomes the
+\textbf{nonlinear (Riccati-type) Sylvester equation}
+\begin{empheq}[box=\fbox]{equation}\label{eq:sylvester}
+  \mathbf V \;=\; \widetilde D \;+\; \beta\,T\,\mathbf V\,\big(T^{\top}+G(\mathbf V)\big).
+\end{empheq}
+This is the discrete-time analogue of Bilal's continuous-time Sylvester equation
+$\rho v = D + Lv + vL^{\top} + vGv$ and is solved by the same fast iterative schemes.
+
+\subsection{Linearized law of motion of the distribution}
+
+Perturbing \eqref{eq:kfe} once $v$ (hence $G$) is known gives the discrete-time
+analogue of Bilal's eq.~(10),
+\begin{equation}\label{eq:lom}
+  h_{t+1}\;=\;\Tstar h_t \;+\; \Gop h_t
+  \qquad\Longleftrightarrow\qquad
+  h_{t+1}=\big(T^{\top}+G\big)\,h_t .
+\end{equation}
+The first term is the partial-equilibrium transport of the impulse; the second is the
+general-equilibrium feedback through savings. Iterating \eqref{eq:lom} forward
+delivers impulse responses without solving any further fixed point (block
+recursivity). \textbf{Stability} is the discrete-time mirror of the continuous-time
+condition: convergence back to steady state requires the spectral radius of
+$T^{\top}+G$ to be strictly below $1$ (rather than the eigenvalues of $L^{*}+\Gop$
+having strictly negative real part).
+
+\section{The Huggett variant: an implicitly priced asset}\label{sec:huggett}
+
+In Krusell--Smith the asset is productive capital and its price is the marginal
+product, a \emph{technological} functional of the distribution. Huggett (1993) is the
+polar case: a pure-exchange economy in which the asset is in fixed net supply and its
+price is determined \emph{behaviorally}, by market clearing. The Master Equation
+accommodates this with no change in logic---only the price functional is replaced.
+
+\subsection{Setup}
+
+There is no production: $y$ is an exogenous \emph{endowment} (still Markov with
+operator $P$), so there is no wage. Households trade a one-period bond. Let $q_t$ be
+the \emph{current bond price}: a unit of the bond bought at $t$ costs $q_t$ and pays
+one unit of the good at $t+1$, so
+\begin{equation}\label{eq:hug-q}
+  \frac{1}{q_t}\;=\;1+r_t .
+\end{equation}
+Let $a_t$ denote the (matured) bond holdings carried into $t$, each paying one unit,
+and $a_{t+1}$ the bonds purchased at $t$. The budget constraint is
+\begin{equation}\label{eq:hug-budget}
+  c_t + q_t\,a_{t+1} \;=\; a_t + y_t, \qquad a_{t+1}\ge \underline a .
+\end{equation}
+Writing the budget with $q_t$ rather than $r_t$ is the economically correct timing:
+the period-$t$ saving choice trades at the \emph{current} price $q_t$, whereas the
+realized return $r_t=1/q_t-1$ in \eqref{eq:hug-q} is the payoff on \emph{already-held}
+bonds $a_t$ and is predetermined. Thus $r_t$ does not affect time-$t$ behavior; $q_t$
+does, and $q_t$ is the price that clears the market. The bond is in fixed net supply
+$B$ (pure Huggett sets $B=0$; $B>0$ represents government debt).
+
+\paragraph{The asset-demand function.} To determine the price, treat the current bond
+price $q$ as a \emph{free variable} rather than imposing $q=Q(g)$. For a candidate $q$,
+let
+\begin{equation}\label{eq:hug-demand}
+  \mathcal A(x;\,q,\,g)\;\equiv\;\arg\max_{a'\ge\underline a}\;
+  u\big(a+y-q\,a'\big)+\beta\!\int V\big((a',y'),\Phi(g)\big)\,P(y,\dd y')
+\end{equation}
+denote the household's bond demand when the \emph{current} trade is at price $q$ and
+the continuation is taken at the equilibrium law of motion $\Phi(g)$. This is the
+\emph{asset-demand function}: because $q$ enters the current budget, $\mathcal A$
+genuinely depends on it, with $\partial_q\mathcal A<0$ in the usual case (demand falls
+as the bond gets more expensive). The \emph{equilibrium} policy is the special case in
+which the trade occurs at the market-clearing price,
+\[
+  \hat a(x,g)\;=\;\mathcal A\big(x;\,Q(g),\,g\big),
+\]
+which is why the equilibrium policy $\hat a(x,g)$ alone carries no free price: it has
+$q=Q(g)$ already substituted. The bond price $Q(g)$ is the value that clears the
+market,
+\begin{equation}\label{eq:hug-clearing}
+  \int \mathcal A(x;\,q,\,g)\,g(x)\dd x \;=\; B
+  \qquad\Longrightarrow\qquad
+  q \;=\; Q(g)\ \ \text{(defined \emph{implicitly}).}
+\end{equation}
+Since $\partial_q\mathcal A\neq 0$, \eqref{eq:hug-clearing} is a genuine
+(one-dimensional) equation in $q$.
+
+\subsection{Master Equation}
+
+Nothing changes in the recursive logic: $q=Q(g)$ is a (Fr\'echet-differentiable)
+functional of the distribution, so Bilal's Assumption~2 is satisfied with an
+implicitly defined functional. The discrete-time Master Equation \eqref{eq:master}
+becomes
+\begin{equation}\label{eq:hug-master}
+  V(x,g) \;=\; \max_{a'\ge \underline a}\;
+  u\!\big(a + y - Q(g)\,a'\big)
+  \;+\; \beta\,\int V\!\big((a',y'),\,\Phi(g)\big)\,P(y,\dd y'),
+\end{equation}
+with the same one-step distribution map $\Phi(g)=\Tstar(\cdot,g)[g]$. Steady state is
+a pair $(\Vss,\gss)$ with $q^{\mathrm{ss}}=Q(\gss)$ clearing \eqref{eq:hug-clearing}.
+
+\subsection{FAME}
+
+The Impulse Value ansatz \eqref{eq:ansatz} and the FAME \eqref{eq:fame} are unchanged
+in form. Two things are different relative to Krusell--Smith.
+
+\paragraph{(i) A single bond-price channel.} Income is an exogenous endowment, so there
+is no wage. The only price is $q=Q(g)$, and it enters the household's value only
+through the cost $q\,a'$ of new bonds. By the envelope theorem, the direct effect of a
+price change $\dd q=Q'(\gss)[\delta_\xi]$ on the value, valued at steady-state marginal
+utility, gives the price-impact function
+\begin{equation}\label{eq:hug-D}
+  D(x,\xi) \;=\; -\,\hat a^{\mathrm{ss}}(x)\;Q'(\gss)[\delta_\xi],
+\end{equation}
+i.e.\ a household that is buying bonds ($\hat a^{\mathrm{ss}}(x)>0$) is hurt by a higher
+bond price, in proportion to its bond purchases. (Contrast Krusell--Smith, where the
+price impact was proportional to asset \emph{holdings} $a$ and worked through both $r$
+and $w$.) Here $Q'(\gss)[\delta_\xi]$ is the marginal effect on the equilibrium bond
+price of placing an infinitesimal unit of mass at $\xi=(a_\xi,y_\xi)$.
+
+\paragraph{(ii) The price impact is implicit and endogenous to $v$.}
+Apply the implicit function theorem to the market-clearing condition
+\eqref{eq:hug-clearing}, differentiating in the direction $h$. The distribution
+$g$ enters \eqref{eq:hug-clearing} both directly (as the measure $\int\mathcal A\,g$)
+and through the continuation $\Phi(g)$ inside $\mathcal A$, so
+\begin{equation}\label{eq:hug-Qprime}
+  Q'(\gss)[h]
+  \;=\;-\,\frac{\displaystyle \int \hat a^{\mathrm{ss}}(x)\,h(x)\dd x
+        \;+\;\int \frac{\partial \mathcal A}{\partial g}\!\cdot h\;\gss(x)\dd x}
+       {\displaystyle \int \frac{\partial \mathcal A}{\partial q}(x)\;\gss(x)\dd x },
+  \qquad \hat a^{\mathrm{ss}}(x)=\mathcal A(x;q^{\mathrm{ss}},\gss).
+\end{equation}
+The denominator $\int \partial_q\mathcal A\;\gss<0$ is the \emph{slope of the aggregate
+bond-demand curve}; the price moves \emph{more} the \emph{less} elastic aggregate
+demand is. In the numerator, the first term is the mechanical composition effect
+(adding mass at $\xi$ contributes $\hat a^{\mathrm{ss}}(\xi)$ to demand directly), and
+the second, $\int \partial_g\mathcal A\cdot h\,\gss$, is the response of demand to the
+change in the \emph{future} path of prices that $h$ induces through $\Phi(g)$---the
+channel that carries the Impulse Value $v$ into the price. In Krusell--Smith the
+denominator was instead the closed-form curvature of the marginal product, so
+$D(x,\xi)$ was known once $\gss$ was known, \emph{independently} of $v$. In Huggett,
+$\partial_g\mathcal A$ depends on the household's valuation of distributional
+change---i.e.\ on $v$ itself, through the dMPC. Hence $D=D(v)$, and the FAME becomes the
+fixed point
+\begin{equation}\label{eq:hug-sylvester}
+  \mathbf V \;=\; \widetilde D(\mathbf V) \;+\; \beta\,T\,\mathbf V\,\big(T^{\top}+G(\mathbf V)\big),
+\end{equation}
+where now \emph{both} $\widetilde D$ (via the market-clearing elasticity
+\eqref{eq:hug-Qprime}) and $G$ depend on $\mathbf V$. The GE kernel $G$ retains the
+form of Section~4, with the saving response $\delta s(\zeta,\xi)=D(\zeta,\xi)-\delta
+c(\zeta,\xi)$ now driven by the single implicit price \eqref{eq:hug-Qprime}.
+Everything else---block recursivity, the linearized law of motion
+\eqref{eq:lom}, and the stability criterion (spectral radius of $T^{\top}+G$ below
+$1$)---carries over unchanged.
+
+\paragraph{Summary of the contrast.} Huggett is nested in the same Master Equation as
+Krusell--Smith: one passes from one to the other simply by replacing the
+marginal-product price functional with the market-clearing functional
+\eqref{eq:hug-clearing}. The substantive consequence is that the price impact
+$D$ is no longer a closed-form steady-state object but is itself part of the FAME fixed
+point, because the market-clearing price responds to the same household behavior that
+the Impulse Value encodes.
+
+\section{Aggregate shocks}
+
+Let aggregate productivity be $Z_t=\bar Z\,e^{\varepsilon z_t}$, with $z_t$ a
+stationary AR(1),
+\[
+  z_{t+1}=\phi\,z_t+\sigma\,\eta_{t+1},\qquad |\phi|<1,\ \ \eta_{t+1}\sim(0,1),
+\]
+and define the aggregate expectation operator
+$(\Aop\psi)(z)\equiv\E[\psi(z_{t+1})\mid z_t=z]$, the discrete-time analogue of the
+generator $A(z)$ in Bilal's eq.~(11). Prices \eqref{eq:prices} now depend on $z$
+through $Z$. The \textbf{Master Equation with aggregate shocks} is
+\begin{equation}\label{eq:master-agg}
+  V(x,z,g)=\max_{a'\ge0}\;
+  u(c)
+  +\beta\,\E\Big[\,V\big((a',y'),\,z',\,\Phi(g,z)\big)\ \big|\ y,z\,\Big],
+\end{equation}
+where $\Phi(g,z)$ is the one-step distribution map evaluated at current aggregate
+state $z$ and the expectation is over $(y',z')$.
+
+\paragraph{First-order expansion.}
+With both the distributional deviation and the shock scale of order $\varepsilon$,
+\[
+  V(x,z,\gss+\varepsilon h)=\Vss(x)+\varepsilon\Big\{\int v(x,\xi)h(\xi)\dd\xi+\omega(x,z)\Big\}+o(\varepsilon),
+\]
+where the deterministic Impulse Value $v$ still solves the deterministic FAME
+\eqref{eq:fame} (certainty equivalence / block recursivity), and $\omega(x,z)$ is the
+\emph{stochastic Impulse Value}. Substituting into \eqref{eq:master-agg} yields the
+\textbf{discrete-time stochastic FAME}
+\begin{empheq}[box=\fbox]{equation}\label{eq:sfame}
+  \omega(x,z)=\underbrace{z\,\Omega(x)\,u'(\css(x))}_{\text{direct price impact of }z}
+  +\beta\,\underbrace{\big(\Aop\,\Tr_1\,\omega\big)(x,z)}_{\substack{\text{continuation:}\\ \text{own state and }z}}
+  +\beta\,\underbrace{\Tr_1\!\Big[\,v\star S(\cdot,z)\,\Big](x)}_{\substack{\text{GE: savings responses}\\ \text{to the aggregate shock}}},
+\end{empheq}
+where $\Omega(x)=R_Z\,a+W_Z\,y$ collects the direct effect of $Z$ on prices
+(the analogue of Bilal's $\Omega(x)=R_2a+W_2y$), and $S(\cdot,z)$ is the GE savings
+response to the aggregate shock. Given $v$, equation \eqref{eq:sfame} is \emph{linear}
+in $\omega$ (the deterministic FAME was quadratic in $v$), exactly as in continuous
+time, and reduces to a linear system after discretization.
+
+\paragraph{Law of motion with aggregate shocks.}
+The linearized distribution evolves as the discrete-time analogue of Bilal's eq.~(15),
+\begin{equation}\label{eq:lom-agg}
+  h_{t+1}=\big(T^{\top}+G\big)\,h_t + S\,z_t,
+\end{equation}
+so that iterating \eqref{eq:lom-agg} with $\{z_t\}$ produces aggregate impulse
+responses and characterizes the stochastic steady state.
+
+\section{Summary: the continuous-to-discrete dictionary}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{l l l}
+\hline
+\textbf{Object} & \textbf{Continuous time (Bilal)} & \textbf{Discrete time (this note)}\\
+\hline
+Discounting & rate $\rho$ & factor $\beta=e^{-\rho\Delta t}$\\
+Own-state evolution & generator $L(x,c,g)$ & transition operator $\Tr$, eq.~\eqref{eq:Top}\\
+Income process & generator $M(y)$ & Markov operator $P$\\
+Distribution law of motion & $\partial_t g=L^{*}[g]$ & $g_{t+1}=\Tstar[g_t]=\Phi(g_t)$\\
+Master Equation & eq.~(7) & eq.~\eqref{eq:master}\\
+Two continuation terms $L_1+L_2$ & sum of generators & product $\Tr_1\Tr_2$\\
+FAME & $\rho v=D+Lv+vL^{\top}+vGv$ & $\mathbf V=\widetilde D+\beta T\mathbf V(T^{\top}+G)$\\
+LoM of impulse & $\partial_t h=L^{*}h+\Gop h$ & $h_{t+1}=(T^{\top}+G)h_t$\\
+Stability & $\mathrm{Re}\,\mathrm{eig}<0$ & spectral radius $<1$\\
+Stochastic FAME & eq.~(14), linear in $\omega$ & eq.~\eqref{eq:sfame}, linear in $\omega$\\
+\hline
+\end{tabular}
+\end{center}
+
+\noindent
+The discrete-time FAME is precisely the analytic, ``linearize-then-discretize''
+foundation for state-space methods in discrete time (Reiter, 2009; Ahn et al., 2018)
+and is the natural companion of the discrete-time perturbation techniques of
+Bhandari et al.\ (2023) and the sequence-space Jacobian approach of Auclert et al.\
+(2021).
+
+\end{document}

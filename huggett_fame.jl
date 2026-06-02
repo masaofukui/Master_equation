@@ -24,6 +24,7 @@ using LinearAlgebra
 using Printf
 using Random
 using Plots
+using QuantEcon: rouwenhorst
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -42,28 +43,19 @@ Base.@kwdef struct Huggett
 end
 
 # -----------------------------------------------------------------------------
-# Rouwenhorst discretization of a log-AR(1); returns income levels (mean 1) and Π
+# Income process: Rouwenhorst discretization (via QuantEcon) of the log-AR(1)
+#   log y_t = ρ log y_{t-1} + σ ε_t.
+# QuantEcon.rouwenhorst(n, ρ, σ) returns a MarkovChain whose state_values are
+# the log-income nodes and whose `p` is the row-stochastic transition matrix.
+# We exponentiate and rescale so that mean income equals 1.
 # -----------------------------------------------------------------------------
-function rouwenhorst(ρ, σ, n)
-    p = (1 + ρ) / 2
-    Θ = [p 1-p; 1-p p]
-    for m in 3:n
-        z = zeros(m, m)
-        z[1:m-1, 1:m-1] .+= p .* Θ
-        z[1:m-1, 2:m]   .+= (1-p) .* Θ
-        z[2:m, 1:m-1]   .+= (1-p) .* Θ
-        z[2:m, 2:m]     .+= p .* Θ
-        z[2:m-1, :]    ./= 2
-        Θ = z
-    end
-    σz = σ / sqrt(1 - ρ^2)              # unconditional std of log y
-    ψ  = σz * sqrt(n - 1)
-    logy = range(-ψ, ψ; length = n)
-    y = exp.(collect(logy))
-    # stationary distribution of Θ to normalize mean income to 1
-    π = stationary(Matrix(Θ'))         # Θ is row-stochastic; stationary of Θ'
+function income_process(ρ, σ, n)
+    mc = rouwenhorst(n, ρ, σ)          # QuantEcon MarkovChain
+    Π  = Matrix(mc.p)                  # row-stochastic
+    y  = exp.(collect(mc.state_values))
+    π  = stationary(Matrix(Π'))        # normalize mean income to 1
     y ./= dot(π, y)
-    return collect(y), Matrix(Θ)
+    return y, Π
 end
 
 # stationary distribution of a column-stochastic matrix P (P*g = g).
@@ -196,7 +188,7 @@ aggregate_assets(g, p::Huggett, agrid) =
 # -----------------------------------------------------------------------------
 function solve_steady(p::Huggett)
     agrid = make_agrid(p)
-    y, Π = rouwenhorst(p.ρ, p.σ, p.ny)
+    y, Π = income_process(p.ρ, p.σ, p.ny)
     YGRID[] = y
     excess(q) = begin
         c, ap = solve_household(q, Π, p, agrid)
@@ -283,11 +275,11 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
     dq = 1e-5
     _, ap_p = egm_policy(EWa_ss, q + dq, p_local, agrid)
     _, ap_m = egm_policy(EWa_ss, q - dq, p_local, agrid)
-    ψ = vec((ap_p .- ap_m) ./ (2dq))                 # ψ_i < 0 (demand slopes down)
+    dap_dq = vec((ap_p .- ap_m) ./ (2dq))                 # ψ_i < 0 (demand slopes down)
 
     # constrained households: policy pinned at the borrowing limit
     constrained = vec(ss.ap) .<= (agrid[1] + 1e-8)
-    ψ[constrained] .= 0.0
+    dap_dq[constrained] .= 0.0
 
     # curvature denominator  denom_i = -(u'(c)-q u''(c)a') / ψ_i  (>0, unconstrained)
     uc  = cflat .^ (-γ)
@@ -295,18 +287,18 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
     num = uc .- q .* ucc .* apflat                   # = u'(c) - q u''(c) a'
     denom = fill(Inf, n)
     @inbounds for i in 1:n
-        if !constrained[i] && ψ[i] != 0.0
-            denom[i] = -num[i] / ψ[i]
+        if !constrained[i] && dap_dq[i] != 0.0
+            denom[i] = -num[i] / dap_dq[i]
         end
     end
 
     M  = make_M(ss.ap, g, ss.Π, p_local, agrid)
     bD = -(uc .* apflat)                             # b_i = -u'(c_i) a'_i   (for Dtilde)
-    gψ = dot(g, ψ)                                   # aggregate demand slope (<0)
+    g_dap_dq = dot(g, dap_dq)                                   # aggregate demand slope (<0)
 
     v   = zeros(n, n)
     DΦ  = Matrix(T')
-    Qp  = -(apflat) ./ gψ                            # initial price impact (B_future=0)
+    Qp  = -(apflat) ./ g_dap_dq                           # initial price impact (B_future=0)
 
     local err
     for it in 1:maxit
@@ -322,11 +314,11 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
             end
         end
 
-        # price impact of mass at ξ:  Q'_j = -(a'_j + Σ_i g_i Bfut[i,j]) / (g·ψ)
-        Qp = -(apflat .+ (Bfut' * g)) ./ gψ
+        # price impact of mass at ξ:  Q'_j = -(a'_j + Σ_i g_i Bfut[i,j]) / (g·dap_dq)
+        Qp = -(apflat .+ (Bfut' * g)) ./ g_dap_dq
 
         # total policy response to the impulse and the GE kernel
-        dadg = ψ * Qp' .+ Bfut                       # da'_i/dg_j  (n×n)
+        dadg = dap_dq * Qp' .+ Bfut                       # da'_i/dg_j  (n×n)
         G    = M * dadg
         DΦ   = Matrix(T') .+ G
 
@@ -341,59 +333,16 @@ function solve_fame(ss; tol = 1e-9, maxit = 2_000, verbose = true)
         end
         err < tol && break
     end
-    return (; v, DΦ, Qp, ψ, G = DΦ .- Matrix(T'))
+    return (; v, DΦ, Qp, dap_dq, G = DΦ .- Matrix(T'))
 end
 
 # global handle so helper closures can see the parameters/grids
 const PARAMS = Ref{Huggett}()
 
-# -----------------------------------------------------------------------------
-# Nonlinear perfect-foresight (MIT-shock) transition, used to validate the FAME.
-#   Start from g_0 = g^ss + h0 and compute the equilibrium price path {q_t} that
-#   clears the bond market every period, with the economy returning to steady
-#   state.  For small h0 the price path should match the linear FAME prediction
-#   q_t - q^ss ≈ Q'·h_t,  h_{t+1} = (T'+G) h_t.
-# -----------------------------------------------------------------------------
-function mit_transition(ss, h0; Tmax = 120, damp = 0.5, maxit = 400)
-    p = PARAMS[]; agrid = ss.agrid; Π = ss.Π; qss = ss.q
-    css = ss.c
-    q = fill(qss, Tmax + 1)
-    cpath = [copy(css) for _ in 1:Tmax+1]
-    clear(EWa, g) = begin
-        qlo, qhi = p.β * (1 + 1e-4), 1.30
-        qq = 0.5 * (qlo + qhi)
-        for _ in 1:100
-            _, ap = egm_policy(EWa, qq, p, agrid)
-            fq = dot(vec(ap), g) - p.B
-            abs(fq) < 1e-12 && break
-            fq > 0 ? (qlo = qq) : (qhi = qq); qq = 0.5 * (qlo + qhi)
-        end
-        return qq
-    end
-    for it in 1:maxit
-        # backward pass: consumption policy along the (current) price path
-        cpath[Tmax+1] = css
-        for t in Tmax:-1:1
-            EWa = continuation_EWa(cpath[t+1], Π, p)
-            ct, _ = egm_policy(EWa, q[t], p, agrid)
-            cpath[t] = ct
-        end
-        # forward pass: clear the market each period given the predetermined g_t
-        g = ss.g .+ h0
-        qnew = copy(q)
-        for t in 1:Tmax
-            EWa = continuation_EWa(cpath[t+1], Π, p)
-            qnew[t] = clear(EWa, g)
-            _, ap = egm_policy(EWa, qnew[t], p, agrid)
-            g = make_T(ap, Π, p, agrid)' * g
-        end
-        qnew[Tmax+1] = qss
-        err = maximum(abs.(qnew .- q))
-        q .= damp .* qnew .+ (1 - damp) .* q
-        err < 1e-11 && break
-    end
-    return q[1:Tmax] .- qss          # dq_t for t = 0, 1, ..., Tmax-1
-end
+# Nonlinear perfect-foresight (MIT-shock) transition `mit_transition`, used only
+# to validate the FAME.  Kept in a separate file; it shares this module scope
+# and relies on PARAMS, egm_policy, continuation_EWa, make_T defined above.
+include("huggett_mit.jl")
 
 # -----------------------------------------------------------------------------
 # Validation of the contemporaneous price impact.
@@ -426,8 +375,8 @@ function validate_priceimpact(ss, fame)
     Random.seed!(1)
     constrained = vec(ss.ap) .<= (agrid[1] + 1e-8)
     h = randn(n); h[constrained] .= 0.0; h .-= sum(h) / n
-    gψ = dot(ss.g, fame.ψ)
-    Qsimple = -(vec(ss.ap)) ./ gψ
+    g_dap_dq = dot(ss.g, fame.dap_dq)
+    Qsimple = -(vec(ss.ap)) ./ g_dap_dq
     ε = 1e-6
     dq_num = (clear_q(ss.g .+ ε .* h) - clear_q(ss.g .- ε .* h)) / (2ε)
     dq_an  = dot(Qsimple, h)
@@ -470,7 +419,7 @@ function main(p::Huggett = Huggett(); run_mit = true)
     # ----- Validation: price impact Q' against a direct finite difference -----
     # Hold the continuation at steady state and recompute the market-clearing
     # bond price for g = g^ss + ε h.  d q/dε should equal Q'_simple · h, where
-    # Q'_simple = -a'/(g·ψ) is Q' without the future-feedback term.
+    # Q'_simple = -a'/(g·dap_dq) is Q' without the future-feedback term.
     validate_priceimpact(ss, fame)
 
     # --- Impulse response to a distributional shock --------------------------
@@ -556,3 +505,11 @@ function main(p::Huggett = Huggett(); run_mit = true)
 end
 
 main()
+
+
+p = Huggett()
+
+ss = solve_steady(p)
+
+using BenchmarkTools
+@time fame = solve_fame(ss)
