@@ -2,14 +2,13 @@
 
 [Lecture note link](https://masaofukui.github.io/741_Fukui_2025_topic10.pdf)
 
-Discrete-time companion to the continuous-time master-equation framework of
-Bilal, *Solving Heterogeneous Agent Models with the Master Equation*. The code
+The code
 solves the steady state of a discrete-time Huggett economy (idiosyncratic income,
 a single implicitly priced bond with `1/q = 1 + r`) and computes the interest-rate
 impulse response to a wealth-redistribution shock **three independent ways**:
 
-- **FAME** — First-order Approximation to the Master Equation: solves for the
-  Impulse Value `v(x,ξ) = ∂V(x)/∂g(ξ)` and the linearized law of motion `T' + G`.
+- **FAME (discrete-time)** — First-order Approximation to the Master Equation: solves for the
+  Impulse Value `v(x,ξ) = ∂V(x)/∂g(ξ)` and the linearized law of motion `T' + G`. This is Discrete-time companion to the continuous-time master-equation framework of Bilal, *Solving Heterogeneous Agent Models with the Master Equation*. 
 - **SSJ** — Sequence-Space Jacobian / "fake-news" algorithm of
   Auclert, Bardóczy, Rognlie & Straub (2021).
 - **MIT** — fully nonlinear perfect-foresight transition (ground-truth validation).
@@ -68,4 +67,4 @@ only re-prices a reshuffling of the fixed asset stock.
 
 
 ## Notes
-Cursor Opus 4.8 was used in designing and implementing the code.
+Claude Opus 4.8 was used in designing and implementing the code.
