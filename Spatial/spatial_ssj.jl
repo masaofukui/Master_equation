@@ -17,7 +17,9 @@
 #  Run:  julia spatial_ssj.jl
 # =============================================================================
 
-include("SpatialHuggett.jl")
+if !isdefined(Main, :SpatialHuggett)
+    include("SpatialHuggett.jl")
+end
 using .SpatialHuggett
 using LinearAlgebra, Printf, Plots
 

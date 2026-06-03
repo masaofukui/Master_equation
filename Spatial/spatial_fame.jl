@@ -28,7 +28,9 @@
 #  Run:  julia spatial_fame.jl
 # =============================================================================
 
-include("SpatialHuggett.jl")
+if !isdefined(Main, :SpatialHuggett)
+    include("SpatialHuggett.jl")
+end
 using .SpatialHuggett
 using LinearAlgebra, Printf, Random, Plots
 
@@ -65,12 +67,13 @@ function household_sensitivities(ss, p; hr = 1e-6)
     ap0 = bw0.ap
 
     ninp = 1 + 2J
-    Sap = zeros(n, ninp); SC = zeros(n, ninp)
+    Sap = zeros(n, ninp); SC = zeros(n, ninp); SV = zeros(n, ninp)
     function fill_col!(col, dr, dw, dP)
         bp = SH.backward_step(Vss, Css, ss.r + dr, ss.w .+ dw, ss.P .+ dP, ss.χ, p)
         bm = SH.backward_step(Vss, Css, ss.r - dr, ss.w .- dw, ss.P .- dP, ss.χ, p)
-        Sap[:, col] = vec((bp.ap .- bm.ap) ./ (2hr))
-        SC[:, col]  = vec((bp.C  .- bm.C ) ./ (2hr))
+        Sap[:, col] = vec((bp.ap    .- bm.ap)    ./ (2hr))
+        SC[:, col]  = vec((bp.C     .- bm.C )    ./ (2hr))
+        SV[:, col]  = vec((bp.Vcurr .- bm.Vcurr) ./ (2hr))
     end
     fill_col!(1, hr, zeros(J), zeros(J))                       # r
     for k in 1:J
@@ -91,7 +94,44 @@ function household_sensitivities(ss, p; hr = 1e-6)
             dμda[i, k] = (μp[ia, j, k] - μm[ia, j, k]) / (2hap)
         end
     end
-    return (; Sap, SC, dμda, ap0)
+    return (; Sap, SC, SV, dμda, ap0)
+end
+
+# -----------------------------------------------------------------------------
+# Continuation Jacobians of the backward step (the anticipation channel).
+# Perturb the continuation value Vnext and policy Cnext state by state and read
+# off the response of (a', C, Vcurr) and the migration shares μ.
+#   JaV = ∂a'/∂Vnext, JCV = ∂C/∂Vnext, JVV = ∂Vcurr/∂Vnext   (n×n)
+#   JaC = ∂a'/∂Cnext, JCC = ∂C/∂Cnext, JVC = ∂Vcurr/∂Cnext   (n×n)
+#   JmuV[k] = ∂μ_{·,k}/∂Vnext                                  (n×n, per region k)
+# All flattenings use vec (column-major), consistent with idx(ia,j)=(j-1)na+ia.
+# -----------------------------------------------------------------------------
+function continuation_jacobians(ss, p; δ = 1e-6)
+    na, J = p.na, p.J; n = SH.n_states(p)
+    Vss, Css = ss.V, ss.C
+    JaV = zeros(n, n); JCV = zeros(n, n); JVV = zeros(n, n)
+    JaC = zeros(n, n); JCC = zeros(n, n); JVC = zeros(n, n)
+    JmuV = [zeros(n, n) for _ in 1:J]
+    for s in 1:n
+        Vp = copy(Vss); Vp[s] += δ; Vm = copy(Vss); Vm[s] -= δ
+        bp = SH.backward_step(Vp, Css, ss.r, ss.w, ss.P, ss.χ, p)
+        bm = SH.backward_step(Vm, Css, ss.r, ss.w, ss.P, ss.χ, p)
+        JaV[:, s] = vec((bp.ap    .- bm.ap)    ./ (2δ))
+        JCV[:, s] = vec((bp.C     .- bm.C )    ./ (2δ))
+        JVV[:, s] = vec((bp.Vcurr .- bm.Vcurr) ./ (2δ))
+        μp = SH.migration_probs(Vp, bp.ap, ss.χ, p)
+        μm = SH.migration_probs(Vm, bm.ap, ss.χ, p)
+        for k in 1:J
+            JmuV[k][:, s] = vec((μp[:, :, k] .- μm[:, :, k]) ./ (2δ))
+        end
+        Cp = copy(Css); Cp[s] += δ; Cm = copy(Css); Cm[s] -= δ
+        bp2 = SH.backward_step(Vss, Cp, ss.r, ss.w, ss.P, ss.χ, p)
+        bm2 = SH.backward_step(Vss, Cm, ss.r, ss.w, ss.P, ss.χ, p)
+        JaC[:, s] = vec((bp2.ap    .- bm2.ap)    ./ (2δ))
+        JCC[:, s] = vec((bp2.C     .- bm2.C )    ./ (2δ))
+        JVC[:, s] = vec((bp2.Vcurr .- bm2.Vcurr) ./ (2δ))
+    end
+    return (; JaV, JCV, JVV, JaC, JCC, JVC, JmuV)
 end
 
 # input column indices in Sap/SC
@@ -255,9 +295,70 @@ function law_of_motion(ss, p, sens, pim, sp)
             Mμap[idx(ka+1, kk, p), i] += c * ww
         end
     end
-    G  = (Ma .+ Mμap) * da_dg
+    Mtot = Ma .+ Mμap
+    G  = Mtot * da_dg
     DΦ = Matrix(ss.T') .+ G
-    return (; DΦ, G, da_dg)
+    return (; DΦ, G, da_dg, Mtot)
+end
+
+# -----------------------------------------------------------------------------
+# FAME impulse response to an aggregate productivity shock in region `mshock`.
+# Adds the shock's DIRECT loadings onto prices (Q_Z = dp/dZ) and onto the
+# distribution transition (Φ_Z = dg'/dZ), then iterates the state-space recursion
+#       dp_t = Q dg_t + Q_Z dZ_t,     dg_{t+1} = DΦ dg_t + Φ_Z dZ_t,
+# with dg_1 = 0 (assets/population predetermined at impact) and dZ an AR(1).
+# -----------------------------------------------------------------------------
+function fame_productivity_irf(ss, p, sens, sp, pim, lom; mshock = 1,
+                               z0 = -0.01, ρz = 0.8, T = 150, h = 1e-6)
+    na, J = p.na, p.J; n = SH.n_states(p)
+    g = ss.g; Q = pim.Q
+
+    # static partials of P, π w.r.t. the shock Z (scales A[mshock,:])
+    dPdZ = (price_index(ss.w, ss.L, Ashock(ss.A, mshock, h), p) .-
+            price_index(ss.w, ss.L, Ashock(ss.A, mshock, -h), p)) ./ (2h)
+    dπdZ = (trade_shares(ss.w, ss.L, Ashock(ss.A, mshock, h), p) .-
+            trade_shares(ss.w, ss.L, Ashock(ss.A, mshock, -h), p)) ./ (2h)
+
+    Sap, SC = sens.Sap, sens.SC
+    # direct effect of Z on saving/consumption through the price index P
+    S_ap_dPZ = sum(dPdZ[m] .* Sap[:, ci_P(m, J)] for m in 1:J)
+    S_C_dPZ  = sum(dPdZ[m] .* SC[:,  ci_P(m, J)] for m in 1:J)
+
+    # ∂F/∂Z (J-vector): bond market + labor markets (regions 2..J)
+    F_Z = zeros(J)
+    F_Z[1] = dot(g, S_ap_dPZ)
+    for i in 2:J
+        val = 0.0
+        for j in 1:J
+            gCj = sum(g[idx(ia, j, p)] * S_C_dPZ[idx(ia, j, p)] for ia in 1:na)
+            val -= dπdZ[i, j] * pim.Ess[j]
+            val -= ss.π[i, j] * dPdZ[j] * pim.Cagg[j]
+            val -= ss.π[i, j] * ss.P[j] * gCj
+        end
+        F_Z[i] = val
+    end
+    Q_Z = -(pim.App \ F_Z)                                   # J-vector dp/dZ
+
+    # direct effect of the shock on the transition (through the policy response)
+    rap_price = hcat(pim.rap_r, [pim.rap_w[k] for k in 2:J]...)
+    dap_Z = S_ap_dPZ .+ rap_price * Q_Z                      # total saving response
+    Φ_Z   = lom.Mtot * dap_Z                                 # n-vector dg'/dZ
+
+    dZ = [z0 * ρz^(t-1) for t in 1:T]
+    dr = zeros(T); dw = [zeros(T) for _ in 1:J]; dL = [zeros(T) for _ in 1:J]
+    dg = zeros(n)
+    for t in 1:T
+        dp = Q * dg .+ Q_Z .* dZ[t]                          # (r, w_2..w_J)
+        dr[t] = dp[1]
+        for k in 2:J
+            dw[k][t] = dp[k]
+        end
+        for j in 1:J
+            dL[j][t] = sum(dg[idx(ia, j, p)] for ia in 1:na)
+        end
+        dg = lom.DΦ * dg .+ Φ_Z .* dZ[t]
+    end
+    return (; dr, dw, dL, dZ, Q_Z, Φ_Z)
 end
 
 # -----------------------------------------------------------------------------
@@ -284,6 +385,164 @@ function redistribution_shock(ss, p; κ = 1e-2)
         end
     end
     return h
+end
+
+# -----------------------------------------------------------------------------
+# FULL FAME with the anticipation (continuation) channel.
+#
+# Households' saving and (especially) migration choices respond to EXPECTED
+# future values, which move with the aggregate state.  Writing the value/policy
+# functions as v·dg + v_Z·dZ etc., the master equation linearizes to a coupled
+# fixed point for the impulse value v=dV/dg, the impulse policy cg=dC/dg, the
+# price-impact Q=dp/dg and the law of motion DΦ=T'+G, plus the analogous shock
+# loadings (v_Z, c_Z, Q_Z, Φ_Z).  The interest-rate impulse response then solves
+#       dp_t = Q dg_t + Q_Z dZ_t,   dg_{t+1} = DΦ dg_t + Φ_Z dZ_t,  dg_1 = 0.
+# -----------------------------------------------------------------------------
+function fame_full(ss, p, sens, cj, pim, sp; mshock = 1, ρz = 0.8,
+                   tol = 1e-9, maxit = 4000, ξ = 1.0)
+    na, J = p.na, p.J; n = SH.n_states(p); ag = agrid(p)
+    g = ss.g; β = p.β
+    Sap, SC, SV, dμda = sens.Sap, sens.SC, sens.SV, sens.dμda
+    JaV, JCV, JVV = cj.JaV, cj.JCV, cj.JVV
+    JaC, JCC, JVC = cj.JaC, cj.JCC, cj.JVC
+    JmuV = cj.JmuV
+    region(ξidx) = (ξidx - 1) ÷ na + 1
+
+    # ---- input maps: dInput = Dp·dp + DL·dg + DZ·dZ  (input order r,w_1..w_J,P_1..P_J)
+    ninp = 1 + 2J
+    Dp = zeros(ninp, J)               # dp = (dr, dw_2,…,dw_J)
+    Dp[ci_r(), 1] = 1.0
+    for k in 2:J; Dp[ci_w(k, J), k] = 1.0; end
+    for m in 1:J, k in 2:J; Dp[ci_P(m, J), k] = sp.dPdw[m, k]; end
+    DL = zeros(ninp, n)
+    for m in 1:J, ξidx in 1:n; DL[ci_P(m, J), ξidx] = sp.dPdL[m, region(ξidx)]; end
+
+    # shock partials of P, π
+    hZ = 1e-6
+    dPdZ = (price_index(ss.w, ss.L, Ashock(ss.A, mshock, hZ), p) .-
+            price_index(ss.w, ss.L, Ashock(ss.A, mshock, -hZ), p)) ./ (2hZ)
+    dπdZ = (trade_shares(ss.w, ss.L, Ashock(ss.A, mshock, hZ), p) .-
+            trade_shares(ss.w, ss.L, Ashock(ss.A, mshock, -hZ), p)) ./ (2hZ)
+    DZ = zeros(ninp); for m in 1:J; DZ[ci_P(m, J)] = dPdZ[m]; end
+
+    # ---- push-forward pieces: Ma (saving, μ fixed) and P_asset (asset lottery) ----
+    Ma = zeros(n, n); Pas = zeros(na, n)
+    for j in 1:J, ia in 1:na
+        i  = idx(ia, j, p)
+        ka = clamp(searchsortedlast(ag, ss.ap[ia, j]), 1, na - 1)
+        Δ  = ag[ka+1] - ag[ka]
+        ww = clamp((ss.ap[ia, j] - ag[ka]) / Δ, 0.0, 1.0)
+        gi = g[i]
+        Pas[ka,   i] += gi * (1 - ww)
+        Pas[ka+1, i] += gi * ww
+        for kk in 1:J
+            Ma[idx(ka,   kk, p), i] -= gi * ss.μ[ia, j, kk] / Δ
+            Ma[idx(ka+1, kk, p), i] += gi * ss.μ[ia, j, kk] / Δ
+        end
+    end
+    # region-masked steady-state distribution (for g-weighted region sums)
+    gj = [[(region(i) == j ? g[i] : 0.0) for i in 1:n] for j in 1:J]
+
+    Tp = Matrix(ss.T')
+    πss, Pss = ss.π, ss.P
+
+    # assemble G = Ma·ag + Σ_k place(P_asset·μ_g[k]) into region-k asset rows
+    function build_G(ag, μg)
+        G = Ma * ag
+        for r in 1:J
+            blk = Pas * μg[r]                              # na × n
+            @inbounds for a in 1:na
+                G[idx(a, r, p), :] .+= @view blk[a, :]
+            end
+        end
+        return G
+    end
+
+    # ===================== dg-block fixed point =====================
+    v = zeros(n, n); cg = zeros(n, n); DΦ = copy(Tp); Q = copy(pim.Q)
+    local err
+    for it in 1:maxit
+        CV = v * DΦ; CC = cg * DΦ
+        SaveCont = JaV * CV .+ JaC * CC
+        ConsCont = JCV * CV .+ JCC * CC
+        ValCont  = JVV * CV .+ JVC * CC
+        # continuation correction to market clearing
+        Acont = zeros(J, n)
+        Acont[1, :] = g' * SaveCont
+        for i in 2:J, j in 1:J
+            Acont[i, :] .-= (πss[i, j] * Pss[j]) .* (gj[j]' * ConsCont)[:]
+        end
+        Qn  = -(pim.App \ (pim.Apg .+ Acont))
+        Min = Dp * Qn .+ DL
+        ag  = Sap * Min .+ SaveCont
+        cgn = SC  * Min .+ ConsCont
+        vn  = SV  * Min .+ ValCont
+        μg  = [JmuV[r] * CV .+ dμda[:, r] .* ag for r in 1:J]
+        DΦn = Tp .+ build_G(ag, μg)
+        err = max(maximum(abs.(vn .- v)), maximum(abs.(DΦn .- DΦ)))
+        v .= ξ .* vn .+ (1-ξ) .* v
+        cg .= ξ .* cgn .+ (1-ξ) .* cg
+        DΦ .= ξ .* DΦn .+ (1-ξ) .* DΦ
+        Q  = Qn
+        err < tol && break
+    end
+
+    # ===================== Z-block fixed point =====================
+    # contemporaneous F_Z (continuation fixed)
+    S_ap_dPZ = Sap * DZ; S_C_dPZ = SC * DZ
+    Cagg, Ess = pim.Cagg, pim.Ess
+    F_Z = zeros(J)
+    F_Z[1] = dot(g, S_ap_dPZ)
+    for i in 2:J, j in 1:J
+        gCj = sum(g[idx(ia, j, p)] * S_C_dPZ[idx(ia, j, p)] for ia in 1:na)
+        F_Z[i] += -dπdZ[i, j]*Ess[j] - πss[i,j]*dPdZ[j]*Cagg[j] - πss[i,j]*Pss[j]*gCj
+    end
+
+    ΦZ = zeros(n); vZ = zeros(n); cZ = zeros(n); QZ = -(pim.App \ F_Z)
+    for it in 1:maxit
+        KV = v * ΦZ .+ ρz .* vZ
+        KC = cg * ΦZ .+ ρz .* cZ
+        SaveContZ = JaV * KV .+ JaC * KC
+        ConsContZ = JCV * KV .+ JCC * KC
+        ValContZ  = JVV * KV .+ JVC * KC
+        AcontZ = zeros(J)
+        AcontZ[1] = dot(g, SaveContZ)
+        for i in 2:J, j in 1:J
+            AcontZ[i] -= πss[i, j] * Pss[j] * dot(gj[j], ConsContZ)
+        end
+        QZn  = -(pim.App \ (F_Z .+ AcontZ))
+        MinZ = Dp * QZn .+ DZ
+        aZ   = Sap * MinZ .+ SaveContZ
+        cZn  = SC  * MinZ .+ ConsContZ
+        vZn  = SV  * MinZ .+ ValContZ
+        μZ   = [JmuV[r] * KV .+ dμda[:, r] .* aZ for r in 1:J]
+        ΦZn  = Ma * aZ
+        for r in 1:J
+            blk = Pas * μZ[r]
+            @inbounds for a in 1:na; ΦZn[idx(a, r, p)] += blk[a]; end
+        end
+        err = max(maximum(abs.(vZn .- vZ)), maximum(abs.(ΦZn .- ΦZ)))
+        vZ .= vZn; cZ .= cZn; ΦZ .= ΦZn; QZ = QZn
+        err < tol && break
+    end
+
+    return (; v, cg, Q, DΦ, vZ, cZ, QZ, ΦZ)
+end
+
+# trace the FAME IRF (full) to an AR(1) productivity shock
+function fame_full_irf(ss, p, ff; z0 = -0.01, ρz = 0.8, T = 150)
+    na, J = p.na, p.J; n = SH.n_states(p)
+    dZ = [z0 * ρz^(t-1) for t in 1:T]
+    dr = zeros(T); dw = [zeros(T) for _ in 1:J]; dL = [zeros(T) for _ in 1:J]
+    dg = zeros(n)
+    for t in 1:T
+        dp = ff.Q * dg .+ ff.QZ .* dZ[t]
+        dr[t] = dp[1]
+        for k in 2:J; dw[k][t] = dp[k]; end
+        for j in 1:J; dL[j][t] = sum(dg[idx(ia, j, p)] for ia in 1:na); end
+        dg = ff.DΦ * dg .+ ff.ΦZ .* dZ[t]
+    end
+    return (; dr, dw, dL, dZ)
 end
 
 # =============================================================================
