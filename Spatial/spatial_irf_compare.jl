@@ -18,8 +18,8 @@ include("spatial_ssj.jl")
 include("spatial_fame.jl")
 using Plots, Printf, LinearAlgebra
 
-const MSHOCK = 1
-const Z0     = -0.01      # -1% productivity in region 1
+const MSHOCK = 2
+const Z0     = -0.01      # -1% productivity in region MSHOCK
 const RHOZ   = 0.8
 const TH     = 150
 const TSHOW  = 30
@@ -52,28 +52,51 @@ for t in 1:8
             100*ssj.dL[1][t]/ss.L[1], 100*fame.dL[1][t]/ss.L[1])
 end
 
-# ---- overlay plot ----
-tt = 1:TSHOW
-p1 = plot(tt, 1e4 .* ssj.dr[tt]; lw = 2.5, color = :steelblue, label = "SSJ",
-          xlabel = "period t", ylabel = "Δr (bp)", title = "Bond rate")
+# ---- overlay plot: every location, SSJ vs FAME ----
+# Convention: colour = region, line style = method (SSJ solid, FAME dashed+marker).
+tt   = 1:TSHOW
+cols = [:steelblue, :darkorange, :seagreen, :purple, :firebrick, :teal]
+rcol(j) = cols[mod1(j, length(cols))]
+
+style = (fontfamily = "Computer Modern", guidefontsize = 12, tickfontsize = 10,
+         titlefontsize = 13, legendfontsize = 9, framestyle = :box, grid = :y)
+
+ssj_kw(j)  = (lw = 2.8, color = rcol(j), ls = :solid)
+fame_kw(j) = (lw = 2.0, color = rcol(j), ls = :dash, marker = :circle, ms = 3)
+
+zeroline!(pl) = hline!(pl, [0.0]; ls = :dash, lw = 1, color = :gray, label = "")
+
+# Panel 1: bond rate (economy-wide ⇒ method shown by colour)
+p1 = plot(tt, 1e4 .* ssj.dr[tt]; lw = 2.8, color = :steelblue, label = "SSJ",
+          xlabel = "period t", ylabel = "\$\\Delta r\$ (bp)", title = "Bond rate \$r\$", style...)
 plot!(p1, tt, 1e4 .* fame.dr[tt]; lw = 2, ls = :dash, color = :crimson,
-      marker = :circle, ms = 2.5, label = "FAME")
+      marker = :circle, ms = 3, label = "FAME")
+zeroline!(p1)
 
-p2 = plot(; xlabel = "period t", ylabel = "% deviation", title = "Population L₁ (shocked region)")
-plot!(p2, tt, 100 .* ssj.dL[1][tt] ./ ss.L[1]; lw = 2.5, color = :steelblue, label = "SSJ")
-plot!(p2, tt, 100 .* fame.dL[1][tt] ./ ss.L[1]; lw = 2, ls = :dash, color = :crimson,
-      marker = :circle, ms = 2.5, label = "FAME")
+# Panel 2: populations, all regions
+p2 = plot(; xlabel = "period t", ylabel = "% deviation", title = "Population \$L_j\$", style...)
+zeroline!(p2)
+for j in 1:p.J
+    plot!(p2, tt, 100 .* ssj.dL[j][tt]  ./ ss.L[j]; label = "region $j (SSJ)",  ssj_kw(j)...)
+    plot!(p2, tt, 100 .* fame.dL[j][tt] ./ ss.L[j]; label = "region $j (FAME)", fame_kw(j)...)
+end
 
-p3 = plot(; xlabel = "period t", ylabel = "% deviation", title = "Wage w₂")
-plot!(p3, tt, 100 .* ssj.dw[2][tt] ./ ss.w[2]; lw = 2.5, color = :steelblue, label = "SSJ")
-plot!(p3, tt, 100 .* fame.dw[2][tt] ./ ss.w[2]; lw = 2, ls = :dash, color = :crimson,
-      marker = :circle, ms = 2.5, label = "FAME")
+# Panel 3: wages, regions != MSHOCK numeraire (region 1 is the numeraire ⇒ dw₁≡0)
+p3 = plot(; xlabel = "period t", ylabel = "% deviation", title = "Wage \$w_j\$", style...)
+zeroline!(p3)
+for j in 2:p.J
+    plot!(p3, tt, 100 .* ssj.dw[j][tt]  ./ ss.w[j]; label = "region $j (SSJ)",  ssj_kw(j)...)
+    plot!(p3, tt, 100 .* fame.dw[j][tt] ./ ss.w[j]; label = "region $j (FAME)", fame_kw(j)...)
+end
 
-p4 = plot(tt, 100 .* ssj.dZ[tt]; lw = 2, ls = :dot, color = :black, legend = false,
-          xlabel = "period t", ylabel = "%", title = "Productivity shock (region 1)")
+# Panel 4: the driving shock
+p4 = plot(tt, 100 .* ssj.dZ[tt]; lw = 2.5, ls = :dot, color = :black, legend = false,
+          xlabel = "period t", ylabel = "%", title = "Productivity shock (region $MSHOCK)", style...)
+zeroline!(p4)
 
-plt = plot(p1, p2, p3, p4; layout = (2, 2), size = (1000, 720),
-           plot_title = "SSJ vs FAME: IRF to a -1% productivity shock in region 1")
+plt = plot(p1, p2, p3, p4; layout = (2, 2), size = (1050, 760),
+           left_margin = 5Plots.mm, bottom_margin = 5Plots.mm,
+           plot_title = "SSJ (solid) vs FAME (dashed): IRF to a $(round(Int,100*Z0))% productivity shock in region $MSHOCK")
 outpdf = joinpath(@__DIR__, "..", "figure", "spatial_irf_compare.pdf")
 savefig(plt, outpdf)
 @printf("\n  saved overlay to %s\n", normpath(outpdf))

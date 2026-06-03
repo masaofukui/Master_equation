@@ -61,7 +61,8 @@ agrid(p::SParams) = p.amin .+ (p.amax - p.amin) .* (range(0, 1; length = p.na) .
 # -----------------------------------------------------------------------------
 function make_fundamentals(p::SParams; T = nothing, dcost = 1.5, χoff = 0.3)
     J = p.J
-    Tprod = T === nothing ? range(0.9, 1.1; length = J) |> collect : collect(T)
+    Tprod = T === nothing ?
+        (J == 1 ? [1.0] : collect(range(0.9, 1.1; length = J))) : collect(T)
     A = zeros(J, J)
     for k in 1:J, j in 1:J
         A[k, j] = Tprod[k] / (k == j ? 1.0 : dcost)
